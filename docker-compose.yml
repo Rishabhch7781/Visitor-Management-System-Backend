@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # Pehla Box: Hamara Database
+  db:
+    image: postgres:13
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Rishabh%40425316  # Apna asli password yahan dalein
+      POSTGRES_DB: vms_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Doosra Box: Hamari FastAPI Application
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
