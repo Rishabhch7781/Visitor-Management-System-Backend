@@ -14,6 +14,21 @@ import os
 from fastapi import BackgroundTasks
 import time
 from sqlalchemy import func
+import boto3
+from dotenv import load_dotenv
+import os
+
+# Secret file (.env) ko load karna
+load_dotenv()
+
+# AWS S3 ka connection banana
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+    region_name=os.getenv('AWS_REGION')
+)
+
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -147,32 +162,39 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     return {"access_token": token, "token_type": "bearer"}
 
 
-# FILE UPLOAD API: Visitor ki photo save karne ke liye
 @app.post("/upload-photo/{visitor_id}")
 def upload_visitor_photo(
     visitor_id: int, 
     file: UploadFile = File(...), 
     db: Session = Depends(get_db),
-    current_user: str = Depends(get_current_user) # Ye API bhi lock rahegi
+    current_user: str = Depends(get_current_user)
 ):
-    # 1. Check karo ki visitor database mein hai ya nahi
     visitor = db.query(models.Visitor).filter(models.Visitor.id == visitor_id).first()
     if not visitor:
         raise HTTPException(status_code=404, detail="Visitor nahi mila!")
 
-    # 2. File ka naam aur path set karo (e.g., visitor_photos/1_photo.jpg)
-    file_location = f"visitor_photos/{visitor_id}_{file.filename}"
+    # 1. AWS Bucket aur File ka naam set karna
+    bucket_name = os.getenv('AWS_BUCKET_NAME')
+    file_name = f"visitor_photos/{visitor_id}_{file.filename}"
     
-    # 3. File ko folder mein save (copy) karo
-    with open(file_location, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    # 2. File ko S3 Bucket par upload karna
+    s3_client.upload_fileobj(
+        file.file,
+        bucket_name,
+        file_name,
+        ExtraArgs={"ContentType": file.content_type} # Taaki photo browser mein dikhe, download na ho
+    )
+    
+    # 3. Photo ka public URL (Link) banana
+    region = os.getenv('AWS_REGION')
+    file_url = f"https://{bucket_name}.s3.{region}.amazonaws.com/{file_name}"
         
-    # 4. Database mein photo ka rasta (path) save kar do
-    visitor.photo_path = file_location
+    # 4. Database mein us link ko save kar dena
+    visitor.photo_path = file_url
     db.commit()
     db.refresh(visitor)
     
-    return {"message": "Photo successfully upload ho gayi!", "file_path": file_location}
+    return {"message": "Photo S3 Cloud par upload ho gayi!", "file_url": file_url}
 
 # DASHBOARD API: Admin ko statistics dikhane ke liye
 @app.get("/dashboard/")
